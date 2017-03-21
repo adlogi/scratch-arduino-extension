@@ -218,6 +218,226 @@
         }
         pinging = false;
         pingCount = 0;
+/*
+ *This program is free software: you can redistribute it and/or modify
+ *it under the terms of the GNU General Public License as published by
+ *the Free Software Foundation, either version 3 of the License, or
+ *(at your option) any later version.
+ *
+ *This program is distributed in the hope that it will be useful,
+ *but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *GNU General Public License for more details.
+ *
+ *You should have received a copy of the GNU General Public License
+ *along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+(function(ext) {
+
+  var PIN_MODE = 0xF4,
+    REPORT_DIGITAL = 0xD0,
+    REPORT_ANALOG = 0xC0,
+    DIGITAL_MESSAGE = 0x90,
+    START_SYSEX = 0xF0,
+    END_SYSEX = 0xF7,
+    QUERY_FIRMWARE = 0x79,
+    REPORT_VERSION = 0xF9,
+    ANALOG_MESSAGE = 0xE0,
+    ANALOG_MAPPING_QUERY = 0x69,
+    ANALOG_MAPPING_RESPONSE = 0x6A,
+    CAPABILITY_QUERY = 0x6B,
+    CAPABILITY_RESPONSE = 0x6C;
+
+  var INPUT = 0x00,
+    OUTPUT = 0x01,
+    ANALOG = 0x02,
+    PWM = 0x03,
+    SERVO = 0x04,
+    SHIFT = 0x05,
+    I2C = 0x06,
+    ONEWIRE = 0x07,
+    STEPPER = 0x08,
+    ENCODER = 0x09,
+    SERIAL = 0x0A,
+    PULLUP = 0x0B,
+    IGNORE = 0x7F,
+    TOTAL_PIN_MODES = 13;
+
+  var LOW = 0,
+    HIGH = 1;
+
+  var MAX_DATA_BYTES = 4096;
+  var MAX_PINS = 128;
+
+  var parsingSysex = false,
+    waitForData = 0,
+    executeMultiByteCommand = 0,
+    multiByteChannel = 0,
+    sysexBytesRead = 0,
+    storedInputData = new Uint8Array(MAX_DATA_BYTES);
+
+  var digitalOutputData = new Uint8Array(16),
+    digitalInputData = new Uint8Array(16),
+    analogInputData = new Uint16Array(16);
+
+  var analogChannel = new Uint8Array(MAX_PINS);
+  var pinModes = [];
+  for (var i = 0; i < TOTAL_PIN_MODES; i++) pinModes[i] = [];
+
+  var majorVersion = 0,
+    minorVersion = 0;
+
+  var connected = false;
+  var notifyConnection = false;
+  var device = null;
+  var inputData = null;
+
+  // TEMPORARY WORKAROUND
+  // Since _deviceRemoved is not used with Serial devices
+  // ping device regularly to check connection
+  var pinging = false;
+  var pingCount = 0;
+  var pinger = null;
+
+  var hwList = new HWList();
+
+  function HWList() {
+    this.devices = [];
+
+    this.add = function(dev, pin) {
+      var device = this.search(dev);
+      if (!device) {
+        device = {name: dev, pin: pin, val: 0};
+        this.devices.push(device);
+      } else {
+        device.pin = pin;
+        device.val = 0;
+      }
+    };
+
+    this.search = function(dev) {
+      for (var i=0; i<this.devices.length; i++) {
+        if (this.devices[i].name === dev)
+          return this.devices[i];
+      }
+      return null;
+    };
+  }
+
+  function init() {
+
+    for (var i = 0; i < 16; i++) {
+      var output = new Uint8Array([REPORT_DIGITAL | i, 0x01]);
+      device.send(output.buffer);
+    }
+
+    queryCapabilities();
+
+    // TEMPORARY WORKAROUND
+    // Since _deviceRemoved is not used with Serial devices
+    // ping device regularly to check connection
+    pinger = setInterval(function() {
+      if (pinging) {
+        if (++pingCount > 6) {
+          clearInterval(pinger);
+          pinger = null;
+          connected = false;
+          if (device) device.close();
+          device = null;
+          return;
+        }
+      } else {
+        if (!device) {
+          clearInterval(pinger);
+          pinger = null;
+          return;
+        }
+        queryFirmware();
+        pinging = true;
+      }
+    }, 100);
+  }
+
+  function hasCapability(pin, mode) {
+    if (pinModes[mode].indexOf(pin) > -1)
+      return true;
+    else
+      return false;
+  }
+
+  function queryFirmware() {
+    var output = new Uint8Array([START_SYSEX, QUERY_FIRMWARE, END_SYSEX]);
+    device.send(output.buffer);
+  }
+
+  function queryCapabilities() {
+    console.log('Querying ' + device.id + ' capabilities');
+    var msg = new Uint8Array([
+        START_SYSEX, CAPABILITY_QUERY, END_SYSEX]);
+    device.send(msg.buffer);
+  }
+
+  function queryAnalogMapping() {
+    console.log('Querying ' + device.id + ' analog mapping');
+    var msg = new Uint8Array([
+        START_SYSEX, ANALOG_MAPPING_QUERY, END_SYSEX]);
+    device.send(msg.buffer);
+  }
+
+  function setDigitalInputs(portNum, portData) {
+    digitalInputData[portNum] = portData;
+  }
+
+  function setAnalogInput(pin, val) {
+    analogInputData[pin] = val;
+  }
+
+  function setVersion(major, minor) {
+    majorVersion = major;
+    minorVersion = minor;
+  }
+
+  function processSysexMessage() {
+    switch(storedInputData[0]) {
+      case CAPABILITY_RESPONSE:
+        for (var i = 1, pin = 0; pin < MAX_PINS; pin++) {
+          while (storedInputData[i++] != 0x7F) {
+            pinModes[storedInputData[i-1]].push(pin);
+            i++; //Skip mode resolution
+          }
+          if (i == sysexBytesRead) break;
+        }
+        queryAnalogMapping();
+        break;
+      case ANALOG_MAPPING_RESPONSE:
+        for (var pin = 0; pin < analogChannel.length; pin++)
+          analogChannel[pin] = 127;
+        for (var i = 1; i < sysexBytesRead; i++)
+          analogChannel[i-1] = storedInputData[i];
+        for (var pin = 0; pin < analogChannel.length; pin++) {
+          if (analogChannel[pin] != 127) {
+            var out = new Uint8Array([
+                REPORT_ANALOG | analogChannel[pin], 0x01]);
+            device.send(out.buffer);
+          }
+        }
+        notifyConnection = true;
+        setTimeout(function() {
+          notifyConnection = false;
+        }, 100);
+        break;
+      case QUERY_FIRMWARE:
+        if (!connected) {
+          clearInterval(poller);
+          poller = null;
+          clearTimeout(watchdog);
+          watchdog = null;
+          connected = true;
+          setTimeout(init, 200);
+        }
+        pinging = false;
+        pingCount = 0;
         break;
     }
   }
@@ -948,6 +1168,35 @@
       ['r', '讀取類比 %n', 'analogRead', 0],
       ['-'],
       ['r', '對應 %n 由 %n %n 為 %n %n', 'mapValues', 50, 0, 100, -240, 240]
+    ],
+    ar: [
+      ['h', 'عندما يوصل لوح الأردوينو', 'whenConnected'],
+      [' ', 'صِل %m.hwOut إلى الرجل %n', 'connectHW', 'الثنائي الباعث أ', 3],
+      [' ', 'صِل %m.hwIn إلى الرجل التماثلية %n', 'connectHW', 'مفتاح التدوير', 0],
+      ['-'],
+      [' ', 'اجعل %m.leds %m.outputs', 'digitalLED', 'الثنائي الباعث أ', 'في وضع التشغيل'],
+      [' ', 'اجعل إضاءة %m.leds مساويةً %n%', 'setLED', 'الثنائي الباعث أ', 100],
+      [' ', 'غير إضاءة %m.leds بمقدار %n%', 'changeLED', 'الثنائي الباعث أ', 20],
+      ['-'],
+      [' ', 'دوّر %m.servos إلى الموضع %n درجة', 'rotateServo', 'محرك السيرفو أ', 180],
+      [' ', 'دوّر %m.servos بمقدار %n درجة', 'changeServo', 'محرك السيرفو أ', 20],
+      ['-'],
+      ['h', 'عندما يصبح %m.buttons %m.btnStates', 'whenButton', 'المفتاح أ', 'مضغوطًا'],
+      ['b', '%m.buttons مضغوط؟', 'isButtonPressed', 'المفتاح أ'],
+      ['-'],
+      ['h', 'عندما يصبح %m.hwIn %m.ops %n%', 'whenInput', 'مفتاح التدوير', '>', 50],
+      ['r', 'اقرأ %m.hwIn', 'readInput', 'مفتاح التدوير'],
+      ['-'],
+      [' ', 'اجعل الرجل %n %m.outputs', 'digitalWrite', 1, 'في وضع التشغيل'],
+      [' ', 'اجعل الرجل %n مساويًة القيمة %n%', 'analogWrite', 3, 100],
+      ['-'],
+      ['h', 'عندما تصبح الرجل %n %m.outputs', 'whenDigitalRead', 1, 'في وضع التشغيل'],
+      ['b', 'الرجل %n في وضع التشغيل؟', 'digitalRead', 1],
+      ['-'],
+      ['h', 'عندما تصبح الرجل التماثلية %n %m.ops %n%', 'whenAnalogRead', 1, '>', 50],
+      ['r', 'اقرأ الرجل التماثلية %n', 'analogRead', 0],
+      ['-'],
+      ['r', 'انقل %n من المجال %n %n إلى المجال %n %n', 'mapValues', 50, 0, 100, -240, 240]
     ]
   };
 
@@ -1091,6 +1340,16 @@
       outputs: ['開', '關'],
       ops: ['>', '=', '<'],
       servos: ['伺服馬達 A', '伺服馬達 B', '伺服馬達 C', '伺服馬達 D']
+    },
+    ar: {
+      buttons: ['المفتاح أ', 'المفتاح ب', 'المفتاح ج', 'المفتاح د'],
+      btnStates: ['مضغوط', 'محرر'],
+      hwIn: ['مفتاح التدوير', 'حساس الإضاءة', 'حساس الحرارة'],
+      hwOut: ['الثنائي الباعث أ', 'الثنائي الباعث ب', 'الثنائي الباعث ج', 'الثنائي الباعث د', 'المفتاح أ', 'المفتاح ب', 'المفتاح ج', 'المفتاح د', 'محرك السيرفو أ', 'محرك السيرفو ب', 'محرك السيرفو ج', 'محرك السيرفو د'],
+      leds: ['الثنائي الباعث أ', 'الثنائي الباعث ب', 'الثنائي الباعث ج', 'الثنائي الباعث د'],
+      outputs: ['في وضع التشغيل', 'في وضع الإيقاف'],
+      ops: ['>', '=', '<'],
+      servos: ['محرك السيرفو أ', 'محرك السيرفو ب', 'محرك السيرفو ج', 'محرك السيرفو د']
     }
   };
 
