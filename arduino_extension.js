@@ -368,11 +368,17 @@
 
   ext.whenAnalogRead = function(pin, op, val) {
     if (pin >= 0 && pin < pinModes[ANALOG].length) {
-      if (op == '>')
-        return analogRead(pin) > val;
-      else if (op == '<')
-        return analogRead(pin) < val;
-      else if (op == '=')
+      if (op == '>') {
+        if (lang == 'ar')
+          return analogRead(pin) < val;
+        else
+          return analogRead(pin) > val;
+      } else if (op == '<') {
+        if (lang == 'ar')
+          return analogRead(pin) > val;
+        else
+          return analogRead(pin) < val;
+      } else if (op == '=')
         return analogRead(pin) == val;
       else
         return false;
@@ -449,9 +455,9 @@
   ext.whenButton = function(btn, state) {
     var hw = hwList.search(btn);
     if (!hw) return;
-    if (state === 'pressed')
+    if (state === menus[lang]['btnStates'][0]) // state === 'pressed'
       return digitalRead(hw.pin);
-    else if (state === 'released')
+    else if (state === menus[lang]['btnStates'][1]) // state === 'released'
       return !digitalRead(hw.pin);
   };
 
@@ -464,11 +470,17 @@
   ext.whenInput = function(name, op, val) {
     var hw = hwList.search(name);
     if (!hw) return;
-    if (op == '>')
-      return analogRead(hw.pin) > val;
-    else if (op == '<')
-      return analogRead(hw.pin) < val;
-    else if (op == '=')
+    if (op == '>') {
+      if (lang == 'ar')
+        return analogRead(hw.pin) < val;
+      else
+        return analogRead(hw.pin) > val;
+    } else if (op == '<') {
+      if (lang == 'ar')
+        return analogRead(hw.pin) > val;
+      else
+        return analogRead(hw.pin) < val;
+    } else if (op == '=')
       return analogRead(hw.pin) == val;
     else
       return false;
@@ -950,7 +962,7 @@
       ['r', '對應 %n 由 %n %n 為 %n %n', 'mapValues', 50, 0, 100, -240, 240]
     ],
     ar: [
-      ['h', 'عندما يوصل لوح الأردوينو', 'whenConnected'],
+      ['h', 'عند وصل لوح الأردوينو', 'whenConnected'],
       [' ', 'صِل %m.hwOut إلى الرجل %n', 'connectHW', 'الثنائي الباعث أ', 3],
       [' ', 'صِل %m.hwIn إلى الرجل التماثلية %n', 'connectHW', 'مفتاح التدوير', 0],
       ['-'],
@@ -965,16 +977,16 @@
       ['b', '%m.buttons مضغوط؟', 'isButtonPressed', 'المفتاح أ'],
       ['-'],
       ['h', 'عندما يصبح %m.hwIn %m.ops %n%', 'whenInput', 'مفتاح التدوير', '>', 50],
-      ['r', 'اقرأ %m.hwIn', 'readInput', 'مفتاح التدوير'],
+      ['r', 'قيمة %m.hwIn', 'readInput', 'مفتاح التدوير'],
       ['-'],
-      [' ', 'اجعل الرجل %n %m.outputs', 'digitalWrite', 1, 'في وضع التشغيل'],
+      [' ', 'اجعل الرجل %n %m.outputs', 'digitalWrite', 2, 'في وضع التشغيل'],
       [' ', 'اجعل الرجل %n مساويًة القيمة %n%', 'analogWrite', 3, 100],
       ['-'],
-      ['h', 'عندما تصبح الرجل %n %m.outputs', 'whenDigitalRead', 1, 'في وضع التشغيل'],
-      ['b', 'الرجل %n في وضع التشغيل؟', 'digitalRead', 1],
+      ['h', 'عندما تصبح الرجل %n %m.outputs', 'whenDigitalRead', 2, 'في وضع التشغيل'],
+      ['b', 'الرجل %n في وضع التشغيل؟', 'digitalRead', 2],
       ['-'],
       ['h', 'عندما تصبح الرجل التماثلية %n %m.ops %n%', 'whenAnalogRead', 1, '>', 50],
-      ['r', 'اقرأ الرجل التماثلية %n', 'analogRead', 0],
+      ['r', 'قيمة الرجل التماثلية %n', 'analogRead', 0],
       ['-'],
       ['r', 'انقل %n من المجال %n %n إلى المجال %n %n', 'mapValues', 50, 0, 100, -240, 240]
     ]
@@ -1123,8 +1135,8 @@
     },
     ar: {
       buttons: ['المفتاح أ', 'المفتاح ب', 'المفتاح ج', 'المفتاح د'],
-      btnStates: ['مضغوط', 'محرر'],
-      hwIn: ['مفتاح التدوير', 'حساس الإضاءة', 'حساس الحرارة'],
+      btnStates: ['مضغوطًا', 'محررًا'],
+      hwIn: ['مفتاح التدوير', 'حساس الإضاءة', 'حساس الحرارة'],      
       hwOut: ['الثنائي الباعث أ', 'الثنائي الباعث ب', 'الثنائي الباعث ج', 'الثنائي الباعث د', 'المفتاح أ', 'المفتاح ب', 'المفتاح ج', 'المفتاح د', 'محرك السيرفو أ', 'محرك السيرفو ب', 'محرك السيرفو ج', 'محرك السيرفو د'],
       leds: ['الثنائي الباعث أ', 'الثنائي الباعث ب', 'الثنائي الباعث ج', 'الثنائي الباعث د'],
       outputs: ['في وضع التشغيل', 'في وضع الإيقاف'],
